@@ -1,0 +1,21 @@
+{
+  "signals": {
+    "no_website": 40,
+    "brand_affiliated": -30,
+    "no_https": 15,
+    "not_mobile_friendly": 15,
+    "no_analytics": 10,
+    "old_copyright": 10,
+    "no_online_booking": 15,
+    "no_contact_form": 10,
+    "no_chat_widget": 10
+  },
+  "chains": {
+    "Auto repair": ["Maruti", "Suzuki", "Hyundai", "Tata Motors", "Skoda", "Volkswagen", "Honda", "Toyota", "Mahindra", "Kia", "Ford", "Renault", "MG", "Nissan", "Bosch Car Service", "Mahindra First Choice"],
+    "Restaurants": ["McDonald's", "KFC", "Domino's", "Pizza Hut", "Subway", "Burger King", "Starbucks", "Haldiram's"],
+    "Gyms": ["Gold's Gym", "Cult.fit", "Anytime Fitness", "Snap Fitness"],
+    "Pharmacies": ["Apollo", "MedPlus", "Wellness Forever", "Netmeds"],
+    "Salons": ["Lakme", "Jawed Habib", "Naturals", "Green Trends"],
+    "Dental clinics": ["Clove", "Apollo White", "Sabka Dentist"]
+  }
+}

@@ -1,0 +1,22 @@
+# Local environment and credentials
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+.gitdata/
+
+# Build output and dependencies
+**/node_modules/
+**/target/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vercel/
+coverage/
+
+# Local logs and editor files
+*.log
+.idea/
+.vscode/
+.DS_Store

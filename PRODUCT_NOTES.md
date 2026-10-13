@@ -28,7 +28,7 @@ This closes the gap between finding a lead and taking action. It supports the pr
 
 These are technologies evidenced by the repository, not claims about the hosted SaaSquatch product:
 
-- **Frontend:** React 19, TypeScript 6, Vite 8, CSS, lucide-react. It is a static client application. `VITE_API_URL` is documented in the API module but the current API base is a local constant.
+- **Frontend:** React 19, TypeScript 6, Vite 8, CSS, lucide-react. It is a static client application. `VITE_API_URL` supplies the API base at build time; production deployments use the Vercel project's configured environment variable.
 - **Backend:** Rust, Tokio, Ripress 2.5.1, SQLx, Reqwest, Serde, and tracing. Discovery/enrichment runs in Tokio background tasks.
 - **Data sources:** OpenStreetMap Nominatim for geocoding; Overpass API for business discovery; the businesses' public websites for enrichment. The documented collection policy excludes sites whose terms prohibit scraping and requires respecting robots.txt and rate limits.
 - **Database/cache:** PostgreSQL is optional. When `DATABASE_URL` is configured, the backend creates a JSONB cache table and caches geocoding and Overpass responses for 24 hours. Without Postgres, searches still run, but those cache entries are not persisted.

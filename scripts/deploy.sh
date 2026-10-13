@@ -72,25 +72,19 @@ deploy_frontend() {
   else
     die "Neither pnpm nor npm is installed; one is required to run the Vercel CLI."
   fi
-  [[ -f "$FRONTEND_DIR/.env" ]] || die "Missing frontend/.env; add VITE_API_URL before deploying."
   [[ -f "$BACKEND_DOCKERFILE" ]] || die "Missing backend Dockerfile at backend/Dockerfile."
-
-  local api_url
-  api_url="$(sed -n 's/^VITE_API_URL=//p' "$FRONTEND_DIR/.env" | head -n 1)"
-  [[ -n "$api_url" ]] || die "frontend/.env must define VITE_API_URL."
-  [[ "$api_url" == https://* ]] || die "VITE_API_URL must be an HTTPS URL for production."
 
   if [[ ! -f "$FRONTEND_DIR/.vercel/project.json" \
     && ( -z "${VERCEL_ORG_ID:-}" || -z "${VERCEL_PROJECT_ID:-}" ) ]]; then
     die "Link frontend/ to the existing Vercel project once with '${package_runner[*]} dlx vercel link', or set VERCEL_ORG_ID and VERCEL_PROJECT_ID."
   fi
 
-  printf 'Deploying frontend to Vercel production (API: %s)…\n' "$api_url"
+  printf 'Deploying frontend to Vercel production (using Vercel project environment variables)…\n'
   cd "$FRONTEND_DIR"
   if [[ -n "${VERCEL_TOKEN:-}" ]]; then
-    "${package_runner[@]}" dlx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --build-env "VITE_API_URL=$api_url"
+    "${package_runner[@]}" dlx vercel deploy --prod --yes --token "$VERCEL_TOKEN"
   else
-    "${package_runner[@]}" dlx vercel deploy --prod --yes --build-env "VITE_API_URL=$api_url"
+    "${package_runner[@]}" dlx vercel deploy --prod --yes
   fi
 }
 

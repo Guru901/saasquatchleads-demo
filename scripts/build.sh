@@ -13,6 +13,7 @@ fi
 
 (
   cd "$ROOT_DIR/frontend"
+  "$FRONTEND_PM" install
   VITE_API_URL="${VITE_API_URL:-http://localhost:3000}" "$FRONTEND_PM" run build
 )
 

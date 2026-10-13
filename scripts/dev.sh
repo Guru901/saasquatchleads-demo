@@ -27,10 +27,18 @@ trap cleanup INT TERM EXIT
 # The backend requires a contact email for its public data requests.
 export UPSIDE_CONTACT="${UPSIDE_CONTACT:-dev@example.com}"
 export ALLOWED_ORIGIN="${ALLOWED_ORIGIN:-http://localhost:5173}"
+if command -v pnpm >/dev/null 2>&1; then
+  FRONTEND_PM=pnpm
+elif command -v npm >/dev/null 2>&1; then
+  FRONTEND_PM=npm
+else
+  echo "Neither pnpm nor npm is installed; one is required to run the frontend." >&2
+  exit 1
+fi
 
 (
   cd "$ROOT_DIR/frontend"
-  exec pnpm run dev
+  exec "$FRONTEND_PM" run dev
 ) &
 frontend_pid=$!
 

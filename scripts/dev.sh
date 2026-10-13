@@ -38,6 +38,7 @@ fi
 
 (
   cd "$ROOT_DIR/frontend"
+  exec "$FRONTEND_PM" install
   exec "$FRONTEND_PM" run dev
 ) &
 frontend_pid=$!

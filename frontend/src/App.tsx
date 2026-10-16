@@ -73,7 +73,11 @@ function loadSaved(): Set<string> {
 }
 
 function downloadCsv(rows: Lead[]) {
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const esc = (v: unknown) => {
+        const value = String(v ?? "");
+        const spreadsheetSafe = /^[\s\u0000-\u001f]*[=+@-]/.test(value) ? `'${value}` : value;
+        return `"${spreadsheetSafe.replace(/"/g, '""')}"`;
+    };
     const head = ["Name", "Category", "Address", "Website", "Phone", "Email", "Email status", "Score", "Reasons"];
     const body = rows.map((l) =>
         [l.name, l.category, l.address, l.website, l.phone, l.email, l.emailStatus, l.score,

@@ -10,7 +10,7 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     env,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, LazyLock},
     time::{Duration, Instant},
 };
@@ -1631,7 +1631,7 @@ async fn enrich_one(
         }
     };
 
-    let mut robots = load_robots_policy(client, &homepage, search_id, &lead.name).await;
+    let mut robots = load_robots_policy(&homepage, search_id, &lead.name).await;
     if robots.disallows(&homepage) {
         lead.fetch_status = "blocked".into();
         counts.blocked += 1;
@@ -1639,8 +1639,7 @@ async fn enrich_one(
         return (lead, counts);
     }
 
-    let Some(home_page) =
-        fetch_site_page(client, &homepage, "homepage", search_id, &lead.name).await
+    let Some(home_page) = fetch_site_page(&homepage, "homepage", search_id, &lead.name).await
     else {
         lead.fetch_status = "unreachable".into();
         counts.unreachable += 1;
@@ -1662,12 +1661,12 @@ async fn enrich_one(
             if homepage.port() == Some(80) {
                 let _ = https_url.set_port(None);
             }
-            let https_robots = load_robots_policy(client, &https_url, search_id, &lead.name).await;
+            let https_robots = load_robots_policy(&https_url, search_id, &lead.name).await;
             if !https_robots.disallows(&https_url) {
                 robots = https_robots;
                 https_checked = true;
                 if let Some(https_page) =
-                    fetch_site_page(client, &https_url, "https_probe", search_id, &lead.name).await
+                    fetch_site_page(&https_url, "https_probe", search_id, &lead.name).await
                 {
                     https_available = true;
                     if https_page.final_url.scheme() == "https" {
@@ -1689,8 +1688,7 @@ async fn enrich_one(
                 if robots.disallows(&contact_url) {
                     info!(search_id, business=%lead.name, host=contact_url.host_str().unwrap_or(""), stage="contact_page", elapsed_ms=0, outcome="blocked_by_robots", "site request complete");
                 } else if let Some(contact_page) =
-                    fetch_site_page(client, &contact_url, "contact_page", search_id, &lead.name)
-                        .await
+                    fetch_site_page(&contact_url, "contact_page", search_id, &lead.name).await
                 {
                     lead.email = extract_email_from_html(&contact_page.html);
                 }
@@ -1801,19 +1799,14 @@ impl RobotsPolicy {
     }
 }
 
-async fn load_robots_policy(
-    client: &reqwest::Client,
-    site: &reqwest::Url,
-    search_id: &str,
-    business: &str,
-) -> RobotsPolicy {
+async fn load_robots_policy(site: &reqwest::Url, search_id: &str, business: &str) -> RobotsPolicy {
     let mut robots_url = site.clone();
     robots_url.set_path("/robots.txt");
     robots_url.set_query(None);
     robots_url.set_fragment(None);
     HOST_PACER.wait(&robots_url).await;
     let started = Instant::now();
-    let response = match client.get(robots_url.clone()).send().await {
+    let response = match safe_site_get(robots_url).await {
         Ok(response) => response,
         Err(error) => {
             info!(search_id, business, host=site.host_str().unwrap_or(""), stage="robots_txt", elapsed_ms=started.elapsed().as_millis() as u64, outcome="unreachable", error=%error, "site request complete");
@@ -1823,17 +1816,7 @@ async fn load_robots_policy(
             };
         }
     };
-    let status = response.status();
-    let body = match response.text().await {
-        Ok(body) => body,
-        Err(error) => {
-            info!(search_id, business, host=site.host_str().unwrap_or(""), stage="robots_txt", elapsed_ms=started.elapsed().as_millis() as u64, outcome="body_error", error=%error, "site request complete");
-            return RobotsPolicy {
-                deny_all: true,
-                ..RobotsPolicy::default()
-            };
-        }
-    };
+    let (status, body, _) = response;
     info!(
         search_id,
         business,
@@ -1885,7 +1868,6 @@ async fn load_robots_policy(
 }
 
 async fn fetch_site_page(
-    client: &reqwest::Client,
     url: &reqwest::Url,
     stage: &'static str,
     search_id: &str,
@@ -1893,14 +1875,7 @@ async fn fetch_site_page(
 ) -> Option<FetchedSitePage> {
     HOST_PACER.wait(url).await;
     let started = Instant::now();
-    let result = async {
-        let response = client.get(url.clone()).send().await?;
-        let status = response.status();
-        let final_url = response.url().clone();
-        let body = response.text().await?;
-        Ok::<_, reqwest::Error>((status, body, final_url))
-    }
-    .await;
+    let result = safe_site_get(url.clone()).await;
     match result {
         Ok((status, body, final_url)) if status.is_success() => {
             info!(
@@ -1934,6 +1909,127 @@ async fn fetch_site_page(
         Err(error) => {
             info!(search_id, business, host=url.host_str().unwrap_or(""), stage, elapsed_ms=started.elapsed().as_millis() as u64, outcome="request_error", error=%error, "site request complete");
             None
+        }
+    }
+}
+
+const MAX_SITE_RESPONSE_BYTES: usize = 1_048_576;
+const MAX_SITE_REDIRECTS: usize = 5;
+
+async fn safe_site_get(
+    mut url: reqwest::Url,
+) -> Result<(reqwest::StatusCode, String, reqwest::Url), String> {
+    for redirect_count in 0..=MAX_SITE_REDIRECTS {
+        let client = pinned_public_site_client(&url).await?;
+        let response = client
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if response.status().is_redirection() {
+            if redirect_count == MAX_SITE_REDIRECTS {
+                return Err("too many website redirects".into());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "website redirect has no valid Location".to_string())?;
+            url = url.join(location).map_err(|error| error.to_string())?;
+            continue;
+        }
+        let status = response.status();
+        let final_url = response.url().clone();
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_SITE_RESPONSE_BYTES as u64)
+        {
+            return Err("website response exceeds the 1 MiB limit".into());
+        }
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_SITE_RESPONSE_BYTES {
+                return Err("website response exceeds the 1 MiB limit".into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+        return Ok((status, body, final_url));
+    }
+    Err("too many website redirects".into())
+}
+
+async fn pinned_public_site_client(url: &reqwest::Url) -> Result<reqwest::Client, String> {
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(url.port_or_known_default(), Some(80 | 443))
+    {
+        return Err("website URL must use HTTP(S) on port 80 or 443 without credentials".into());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "website URL has no host".to_string())?;
+    let port = url.port_or_known_default().unwrap_or(0);
+    let addresses: Vec<SocketAddr> = match host.parse::<IpAddr>() {
+        Err(_) => tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::net::lookup_host((host, port)),
+        )
+        .await
+        .map_err(|_| "website DNS lookup timed out".to_string())?
+        .map_err(|error| error.to_string())?
+        .collect(),
+        Ok(address) => vec![SocketAddr::new(address, port)],
+    };
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| !is_public_site_ip(address.ip()))
+    {
+        return Err("website resolves to a non-public IP address".into());
+    }
+    let contact = env::var("UPSIDE_CONTACT").unwrap_or_else(|_| "unknown".to_string());
+    let builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(format!("UpsideBot/0.1 (+mailto:{contact})"))
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .resolve_to_addrs(host, &addresses);
+    let client = builder.build().map_err(|error| error.to_string())?;
+    Ok(client)
+}
+
+fn is_public_site_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || a == 0
+                || a >= 240
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 192 && b == 0)
+                || (a == 198 && (b == 18 || b == 19 || b == 51 && c == 100))
+                || (a == 203 && b == 0 && c == 113))
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_public_site_ip(IpAddr::V4(mapped));
+            }
+            let segments = ip.segments();
+            !(ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_multicast()
+                || (segments[0] & 0xe000 != 0x2000)
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8))
         }
     }
 }

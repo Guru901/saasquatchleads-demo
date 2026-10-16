@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ripress = "2.5.1"
-tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time", "fs"] }
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
